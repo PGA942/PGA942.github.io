@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Misskey NOUN Word Tagger v2</title>
+
+<!-- kuromoji -->
+<script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dist/kuromoji.js"></script>
+
+<style>
+body{
+    font-family:
+    "Hiragino Maru Gothic ProN",
+    "ヒラギノ丸ゴ ProN W4",
+    sans-serif;
+    margin:20px;
+}
+
+#menu{
+    background:#f3f3f3;
+    padding:15px;
+    border-radius:8px;
+    margin-bottom:20px;
+}
+
+.note{
+    border:1px solid #ddd;
+    padding:10px;
+    margin:10px 0;
+    border-radius:6px;
+    line-height:2;
+}
+
+.token{
+    padding:2px 6px;
+    margin:2px;
+    display:inline-block;
+    border-radius:5px;
+    cursor:pointer;
+    user-select:none;
+}
+
+.human{
+    background:#9ed8ff;
+}
+
+.noun{
+    background:#ffd48a;
+}
+
+.mask{
+    background:black;
+    color:white;
+}
+
+textarea{
+    width:400px;
+    height:80px;
+}
+
+button{
+    margin-top:5px;
+}
+</style>
+</head>
+
+<body>
+
+<h2>Misskey 品詞タグ付けマシン v2</h2>
+
+<div id="menu">
+
+<h3>接続設定</h3>
+
+インスタンス<br>
+<input id="instance" value="misskey.io">
+
+<br><br>
+
+アクセストークン<br>
+<input id="token" size="60">
+<button onclick="startMiAuth()">MiAuthログイン</button>
+
+<br><br>
+
+取得数<br>
+
+<select id="limit">
+<option>20</option>
+<option>50</option>
+<option selected>100</option>
+<option>150</option>
+<option>200</option>
+</select>
+
+<hr>
+
+<h3>ホワイトリスト（フォロー中ユーザー名自動入力）</h3>
+
+<textarea id="whitelist"></textarea>
+<br>
+<button onclick="refreshAllTags()">
+ホワイトリスト更新
+</button>
+
+<hr>
+
+<h3>ブラックリスト</h3>
+
+<textarea id="blacklist"></textarea>
+<br>
+<button onclick="refreshAllTags()">
+ブラックリスト更新
+</button>
+
+<hr>
+
+<button onclick="loadNotes()">
+投稿を読み込み
+</button>
+
+<button onclick="exportJSON()">
+JSONダウンロード
+</button>
+
+</div>
+
+<div id="status"></div>
+
+<div id="notes"></div>
+
+<script>
+
+let tokenizer=null
+let dataset=[]
+let rawNotes=[]
+
+/* =========================
+   kuromoji 初期化
+========================= */
+
+async function initTokenizer(){
+
+    setStatus("辞書読み込み中...")
+
+    return new Promise((resolve,reject)=>{
+
+        kuromoji.builder({
+            dicPath:
+            "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/"
+        }).build((err,tok)=>{
+
+            if(err){
+                reject(err)
+                return
+            }
+
+            tokenizer=tok
+
+            setStatus("辞書読み込み完了")
+
+            resolve()
+        })
+    })
+}
+
+/* =========================
+   ステータス表示
+========================= */
+
+function setStatus(text){
+    document.getElementById("status").innerText=text
+}
+
+/* =========================
+   MiAuth
+========================= */
+
+async function startMiAuth(){
+
+    try{
+
+        const instance=
+        document.getElementById("instance").value.trim()
+
+        const sessionId=crypto.randomUUID()
+
+        const permissions=[
+            "read:account",
+            "read:notes",
+            "read:following"
+        ]
+
+        await fetch(
+            `https://${instance}/api/miauth/${sessionId}`,
+            {
+                method:"POST",
+                headers:{
+                    "Content-Type":"application/json"
+                },
+                body:JSON.stringify({
+                    name:"Misskey NOUN Word Tagger",
+                    permission:permissions
+                })
+            }
+        )
+
+        const url=
+        `https://${instance}/miauth/${sessionId}`
+
+        window.open(url,"_blank")
+
+        checkMiAuth(instance,sessionId)
+
+    }catch(e){
+
+        console.error(e)
+        alert("MiAuth開始失敗")
+    }
+}
+
+/* =========================
+   MiAuth確認
+========================= */
+
+async function checkMiAuth(instance,sessionId){
+
+    const interval=setInterval(async()=>{
+
+        try{
+
+            const res=await fetch(
+                `https://${instance}/api/miauth/${sessionId}/check`,
+                {
+                    method:"POST"
+                }
+            )
+
+            const data=await res.json()
+
+            if(data.ok){
+
+                clearInterval(interval)
+
+                document
+                .getElementById("token")
+                .value=data.token
+
+                alert("ログイン成功")
+            }
+
+        }catch(e){
+
+            console.error(e)
+        }
+
+    },3000)
+}
+
+/* =========================
+   投稿読み込み
+========================= */
+
+async function loadNotes(){
+
+    try{
+
+        if(!tokenizer){
+
+            await initTokenizer()
+        }
+
+        setStatus("投稿取得中...")
+
+        const instance=
+        document.getElementById("instance").value.trim()
+
+        const token=
+        document.getElementById("token").value.trim()
+
+        const limit=parseInt(
+            document.getElementById("limit").value
+        )
+
+        /* ノート取得 */
+
+        const res=await fetch(
+            `https://${instance}/api/i/notes`,
+            {
+                method:"POST",
+                headers:{
+                    "Content-Type":"application/json"
+                },
+                body:JSON.stringify({
+                    i:token,
+                    limit:limit
+                })
+            }
+        )
+
+        rawNotes=await res.json()
+
+        /* フォロー取得 */
+
+        setStatus("フォロー一覧取得中...")
+
+        const followingRes=await fetch(
+            `https://${instance}/api/i/following`,
+            {
+                method:"POST",
+                headers:{
+                    "Content-Type":"application/json"
+                },
+                body:JSON.stringify({
+                    i:token,
+                    limit:100
+                })
+            }
+        )
+
+        const following=
+        await followingRes.json()
+
+        const names=[]
+
+        following.forEach(user=>{
+
+            if(user.name){
+                names.push(user.name)
+            }
+
+            if(user.username){
+                names.push(user.username)
+            }
+        })
+
+        document.getElementById("whitelist").value=
+        [...new Set(names)].join(",")
+
+        renderNotes()
+
+        setStatus("完了")
+
+    }catch(e){
+
+        console.error(e)
+
+        alert("読み込み失敗")
+    }
+}
+
+/* =========================
+   リスト取得
+========================= */
+
+function getWhitelist(){
+
+    return document
+    .getElementById("whitelist")
+    .value
+    .toLowerCase()
+    .split(",")
+    .map(v=>v.trim())
+    .filter(v=>v.length)
+}
+
+function getBlacklist(){
+
+    return document
+    .getElementById("blacklist")
+    .value
+    .toLowerCase()
+    .split(",")
+    .map(v=>v.trim())
+    .filter(v=>v.length)
+}
+
+/* =========================
+   タグ判定
+========================= */
+
+function judgeToken(token){
+
+    const text=token.surface_form
+
+    const whitelist=getWhitelist()
+    const blacklist=getBlacklist()
+
+    /* blacklist優先 */
+
+    if(
+        blacklist.includes(text.toLowerCase())
+    ){
+        return "Mask"
+    }
+
+    /* whitelist */
+
+    if(
+        whitelist.includes(text.toLowerCase())
+    ){
+        return "Human"
+    }
+
+    /* 名詞 */
+
+    if(
+        token.pos==="名詞"
+    ){
+        return "Noun"
+    }
+
+    return "Human"
+}
+
+/* =========================
+   描画
+========================= */
+
+function renderNotes(){
+
+    const container=
+    document.getElementById("notes")
+
+    container.innerHTML=""
+
+    dataset=[]
+
+    rawNotes.forEach(note=>{
+
+        const div=document.createElement("div")
+
+        div.className="note"
+
+        const text=note.text || ""
+
+        const tokens=
+        tokenizer.tokenize(text)
+
+        const tokenData=[]
+
+        tokens.forEach(token=>{
+
+            const span=
+            document.createElement("span")
+
+            span.className="token"
+
+            const tag=
+            judgeToken(token)
+
+            span.innerText=
+            tag==="Mask"
+            ? "<mask>"
+            : token.surface_form
+
+            updateClass(span,tag)
+
+            const data={
+                text:token.surface_form,
+                tag:tag
+            }
+
+            span.onclick=()=>{
+
+                cycle(span,data)
+            }
+
+            tokenData.push(data)
+
+            div.appendChild(span)
+        })
+
+        dataset.push({
+            noteId:note.id,
+            tokens:tokenData
+        })
+
+        container.appendChild(div)
+    })
+}
+
+/* =========================
+   クラス更新
+========================= */
+
+function updateClass(el,tag){
+
+    el.className="token"
+
+    if(tag==="Human"){
+        el.classList.add("human")
+    }
+
+    if(tag==="Noun"){
+        el.classList.add("noun")
+    }
+
+    if(tag==="Mask"){
+        el.classList.add("mask")
+    }
+}
+
+/* =========================
+   クリック切替
+========================= */
+
+function cycle(el,data){
+
+    if(data.tag==="Human"){
+        data.tag="Noun"
+    }
+    else if(data.tag==="Noun"){
+        data.tag="Mask"
+    }
+    else{
+        data.tag="Human"
+    }
+
+    el.innerText=
+    data.tag==="Mask"
+    ? "<mask>"
+    : data.text
+
+    updateClass(el,data.tag)
+}
+
+/* =========================
+   リスト更新時再描画
+========================= */
+
+function refreshAllTags(){
+
+    renderNotes()
+}
+
+/* =========================
+   JSON出力
+========================= */
+
+function exportJSON(){
+
+    const blob=new Blob(
+        [
+            JSON.stringify(dataset,null,2)
+        ],
+        {
+            type:"application/json"
+        }
+    )
+
+    const url=
+    URL.createObjectURL(blob)
+
+    const a=
+    document.createElement("a")
+
+    a.href=url
+
+    a.download="tokens.json"
+
+    a.click()
+
+    URL.revokeObjectURL(url)
+}
+
+</script>
+
+</body>
+</html>
