@@ -5,7 +5,7 @@
 <title>Misskey NOUN Word Tagger v2</title>
 
 <!-- kuromoji -->
-<script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dist/kuromoji.js"></script>
+<script type="text/javascript" src="kuromoji.js"></script>
 
 <style>
 body{
@@ -66,8 +66,9 @@ button{
 
 <body>
 
-<h2>Misskey 品詞タグ付けマシン v2</h2>
-
+<h2>Misskey 品詞タグ付けマシン(v1)</h2>
+<p>あなたのMisskeyアカウントの投稿に品詞タグを付けます。投稿の取得からタグ付けまで、全てブラウザ上で行います。<br>
+</p>
 <div id="menu">
 
 <h3>接続設定</h3>
@@ -80,6 +81,15 @@ button{
 アクセストークン<br>
 <input id="token" size="60">
 <button onclick="startMiAuth()">MiAuthログイン</button>
+<p>
+もしうまくいかない場合は、以下2つの権限をONにして、Misskey設定→API→アクセストークン生成<br>
+の順にボタンを押して、ポップアップに表示された英数字をコピペしてください。
+</p>
+
+<ul>
+<li>アカウントの情報を見る(read:notes)</li>
+<li>フォローの情報を見る(read:following)</li>
+</ul>
 
 <br><br>
 
@@ -124,6 +134,17 @@ JSONダウンロード
 </button>
 
 </div>
+<h3>〈使用方法〉</h3>
+<p>①.インスタンスを入力します。<br>
+②.「MiAuthログイン」を押してアカウントのアクセストークンを取得します。<br>
+③.取得数をメニューから選択します。<br>
+④.ブラックリストを入力します。ブラックリストは「比叡山坂本,激無双らーめん,ランダルコーポ」の様に入力してください。<br>
+⑤.「投稿を読み込み」を押してください。投稿が読み込まれ、判定された名前が水色、その他の名詞が黄色で表示されます。<br>
+　もし、ブラックリストに入力していないが、利用されるべきでない単語がある場合は黒くなるまでクリックしてください。また、判定が間違っている部分も修正してもらえると助かります。<br>
+⑥.タグ付けがすべて終わったら「ダウンロード」を押してください。tokens.jsonがダウンロードされます。<br>
+⑦<a href="https://forms.google.com/">Googleフォーム</a>にtokens.jsonを添付して送信してください。<br>
+⑧送信完了ページが表示されればすべて終わりです。お疲れ様でした！</p>
+
 
 <div id="status"></div>
 
