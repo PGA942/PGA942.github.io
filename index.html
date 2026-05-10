@@ -206,9 +206,9 @@ async function startMiAuth(){
             "read:notes",
             "read:following"
         ]
-
+        const encodedmiauthurl = btoa(`https://${instance}/api/miauth/${sessionId}`);
         await fetch(
-            `https://${instance}/api/miauth/${sessionId}`,
+            `https://nanka.mikigohgazou.workers.dev/${encodedmiauthurl}`,
             {
                 method:"POST",
                 headers:{
@@ -220,9 +220,9 @@ async function startMiAuth(){
                 })
             }
         )
-
+        const encodedauthsessionurl = btoa(`https://${instance}/miauth/${sessionId}`);
         const url=
-        `https://${instance}/miauth/${sessionId}`
+        `https://nanka.mikigohgazou.workers.dev/${encodedauthsessionurl}`
 
         window.open(url,"_blank")
 
@@ -242,9 +242,9 @@ async function checkMiAuth(instance,sessionId){
     const interval=setInterval(async()=>{
 
         try{
-
+            const encodedmiauthcheck = btoa(`https://${instance}/api/miauth/${sessionId}/check`);
             const res=await fetch(
-                `https://${instance}/api/miauth/${sessionId}/check`,
+                `https://nanka.mikigohgazou.workers.dev/${encodedmiauthcheck}`,
                 {
                     method:"POST"
                 }
@@ -295,9 +295,9 @@ async function loadNotes(){
         )
 
         /* ノート取得 */
-
+        const encodednotesurl = btoa(`https://${instance}/api/i/notes`);
         const res=await fetch(
-            `https://${instance}/api/i/notes`,
+            `https://nanka.mikigohgazou.workers.dev/${encodednotesurl}`,
             {
                 method:"POST",
                 headers:{
@@ -315,9 +315,9 @@ async function loadNotes(){
         /* フォロー取得 */
 
         setStatus("フォロー一覧取得中...")
-
+        const encodedfollowingurl = btoa(`https://${instance}/api/i/following`);
         const followingRes=await fetch(
-            `https://${instance}/api/i/following`,
+            `https://nanka.mikigohgazou.workers.dev/${encodedfollowingurl}`,
             {
                 method:"POST",
                 headers:{
