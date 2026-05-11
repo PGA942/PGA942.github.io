@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>NER Token Editor(mi)</title>
+<title>みすきーNER部!</title>
 
 <style>
 
@@ -40,15 +40,13 @@ textarea{
 .note{
     background:white;
     border-radius:12px;
-    padding:10px;
-    margin-bottom:12px;
+    padding:12px;
+    margin-bottom:14px;
     box-shadow:0 1px 4px rgba(0,0,0,0.1);
 }
 
-.token-wrap{
-    display:inline-flex;
-    align-items:center;
-    margin:2px;
+.note-header{
+    margin-bottom:8px;
 }
 
 .token{
@@ -59,6 +57,7 @@ textarea{
     user-select:text;
     border:1px solid #ccc;
     background:white;
+    margin:2px;
 }
 
 .tag-H{
@@ -86,8 +85,13 @@ textarea{
     opacity:0.9;
 }
 
-.check{
-    margin-right:3px;
+.gap-btn{
+    border:none;
+    background:none;
+    cursor:pointer;
+    color:#888;
+    font-size:12px;
+    margin:0 2px;
 }
 
 .menu{
@@ -98,6 +102,7 @@ textarea{
     display:none;
     z-index:999;
     overflow:hidden;
+    box-shadow:0 2px 8px rgba(0,0,0,0.2);
 }
 
 .menu button{
@@ -138,6 +143,7 @@ button{
 
 <h1>品詞タグ付けキット(for misskey)</h1>
 <p>あなたのMisskeyアカウントの投稿に品詞タグを付けます。タグ付けから送信までは、全てブラウザ上で行います。</p>
+
 <div class="controls">
 
 <input type="file" id="fileInput">
@@ -186,7 +192,6 @@ button{
 ⑧.<a href="https://forms.gle/oYczKv7k8GZ9D4Zz7">Googleフォーム</a>にtokens.jsonを添付して送信してください。<br>
 ⑨.送信完了ページが表示されればすべて終わりです。お疲れ様でした！</p>
 <hr>
-
 <div id="notes"></div>
 
 <div class="menu" id="menu"></div>
@@ -194,11 +199,11 @@ button{
 <footer>
 
 <button onclick="undo()">
-<h3><=</h3>
+<-
 </button>
 
 <button onclick="redo()">
-<h3>=></h3>
+->
 </button>
 
 <button onclick="downloadJSON()">
@@ -215,8 +220,6 @@ let tokenizer;
 
 let dataset=[];
 
-let selectedText="";
-
 let menuToken=null;
 
 const undoStack=[];
@@ -228,7 +231,7 @@ kuromoji.builder({
 
     tokenizer=t;
 
-    console.log("kuromoji ready");
+    console.log("ready");
 });
 
 function saveState(){
@@ -302,8 +305,9 @@ function tokenizeText(text){
 
     const tk=tokenizer.tokenize(text);
 
-    return tk.filter(
-        t=>t.surface_form.trim()!==""
+    return tk.filter(t=>
+        t.surface_form &&
+        t.surface_form.trim()!==""
     );
 }
 
@@ -369,7 +373,10 @@ function applyPhraseMatching(tokens,tags){
                     if(joined===word){
 
                         for(let k=i;k<=j;k++){
-                            tags[k]=tag;
+
+                            if(tags[k]==="O"){
+                                tags[k]=tag;
+                            }
                         }
                     }
                 }
@@ -387,11 +394,6 @@ function reapplyDictionaries(){
     saveState();
 
     dataset.forEach(row=>{
-
-        for(let i=0;i<row.tag.length;i++){
-
-            row.tag[i]="O";
-        }
 
         applyPhraseMatching(
             row.Token,
@@ -438,9 +440,7 @@ document.getElementById("fileInput")
             dataset.push({
                 Token:tokens,
                 tag:tags,
-                enabled:tokens.map(
-                    v=>v.trim()!==""
-                )
+                enabled:true
             });
         }
 
@@ -462,24 +462,26 @@ function render(){
 
         div.className="note";
 
+        const header=document.createElement("div");
+
+        header.className="note-header";
+
+        const rowCheck=document.createElement("input");
+
+        rowCheck.type="checkbox";
+
+        rowCheck.checked=row.enabled;
+
+        rowCheck.onchange=()=>{
+
+            row.enabled=rowCheck.checked;
+        };
+
+        header.appendChild(rowCheck);
+
+        div.appendChild(header);
+
         row.Token.forEach((token,i)=>{
-
-            const wrap=document.createElement("span");
-
-            wrap.className="token-wrap";
-
-            const check=document.createElement("input");
-
-            check.type="checkbox";
-
-            check.className="check";
-
-            check.checked=row.enabled[i];
-
-            check.onchange=()=>{
-
-                row.enabled[i]=check.checked;
-            };
 
             const span=document.createElement("span");
 
@@ -507,26 +509,32 @@ function render(){
                 render();
             };
 
-            span.oncontextmenu=(e)=>{
+            div.appendChild(span);
 
-                e.preventDefault();
+            if(i<row.Token.length-1){
 
-                menuToken={
-                    rowIndex,
-                    index:i
+                const gap=
+                    document.createElement("button");
+
+                gap.className="gap-btn";
+
+                gap.textContent="⋯";
+
+                gap.onclick=(e)=>{
+
+                    menuToken={
+                        rowIndex,
+                        index:i
+                    };
+
+                    openMenu(
+                        e.pageX,
+                        e.pageY
+                    );
                 };
 
-                openMenu(
-                    e.pageX,
-                    e.pageY
-                );
-            };
-
-            wrap.appendChild(check);
-
-            wrap.appendChild(span);
-
-            div.appendChild(wrap);
+                div.appendChild(gap);
+            }
         });
 
         root.appendChild(div);
@@ -569,23 +577,23 @@ function openMenu(x,y){
     menu.innerHTML=`
 
 <button onclick="mergeLeft()">
-左と結合
+Merge Left
 </button>
 
 <button onclick="mergeRight()">
-右と結合
+Merge Right
 </button>
 
 <button onclick="addSelection('H')">
-人名に追加
+Human追加
 </button>
 
 <button onclick="addSelection('N')">
-固有名詞追加
+Noun追加
 </button>
 
 <button onclick="addSelection('B')">
-ブラックリスト追加
+Blacklist追加
 </button>
 
 `;
@@ -615,24 +623,19 @@ function mergeLeft(){
 
     const i=menuToken.index;
 
-    if(i<=0)return;
+    if(i<0)return;
 
     const row=dataset[r];
 
-    row.Token[i-1]+=row.Token[i];
+    row.Token[i]+=row.Token[i+1];
 
-    row.tag[i-1]=mergeTag(
-        row.tag[i-1],
-        row.tag[i]
+    row.tag[i]=mergeTag(
+        row.tag[i],
+        row.tag[i+1]
     );
 
-    row.enabled[i-1]=
-        row.enabled[i-1] ||
-        row.enabled[i];
-
-    row.Token.splice(i,1);
-    row.tag.splice(i,1);
-    row.enabled.splice(i,1);
+    row.Token.splice(i+1,1);
+    row.tag.splice(i+1,1);
 
     render();
 }
@@ -645,9 +648,9 @@ function mergeRight(){
 
     const i=menuToken.index;
 
-    const row=dataset[r];
+    if(i<0)return;
 
-    if(i>=row.Token.length-1)return;
+    const row=dataset[r];
 
     row.Token[i]+=row.Token[i+1];
 
@@ -656,13 +659,8 @@ function mergeRight(){
         row.tag[i+1]
     );
 
-    row.enabled[i]=
-        row.enabled[i] ||
-        row.enabled[i+1];
-
     row.Token.splice(i+1,1);
     row.tag.splice(i+1,1);
-    row.enabled.splice(i+1,1);
 
     render();
 }
@@ -681,9 +679,8 @@ function addSelection(type){
 
     if(menuToken){
 
-        const row=dataset[
-            menuToken.rowIndex
-        ];
+        const row=
+            dataset[menuToken.rowIndex];
 
         area.value+=
             ","+
@@ -726,16 +723,17 @@ function downloadJSON(){
         ).value
     );
 
-    const result=dataset.map(row=>{
+    const result=dataset
+    .map(row=>{
+
+        if(!row.enabled){
+            return null;
+        }
 
         const outT=[];
         const outTag=[];
 
         for(let i=0;i<row.Token.length;i++){
-
-            if(!row.enabled[i]){
-                continue;
-            }
 
             let token=
                 visibleToken(
@@ -759,7 +757,8 @@ function downloadJSON(){
             Token:outT,
             tag:outTag
         };
-    });
+    })
+    .filter(Boolean);
 
     const blob=new Blob(
         [JSON.stringify(result,null,2)],
