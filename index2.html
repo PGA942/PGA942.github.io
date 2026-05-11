@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>NER Token Editor(mi)</title>
+
+<style>
+
+body{
+    font-family:sans-serif;
+    background:#f5f5f5;
+    margin:0;
+    padding:16px;
+}
+
+h1{
+    margin-top:0;
+}
+
+.controls{
+    margin-bottom:20px;
+}
+
+.csv-wrap{
+    display:flex;
+    flex-wrap:wrap;
+    gap:12px;
+}
+
+.csv-box{
+    flex:1 1 300px;
+}
+
+textarea{
+    width:100%;
+    height:100px;
+    box-sizing:border-box;
+}
+
+.note{
+    background:white;
+    border-radius:12px;
+    padding:10px;
+    margin-bottom:12px;
+    box-shadow:0 1px 4px rgba(0,0,0,0.1);
+}
+
+.token-wrap{
+    display:inline-flex;
+    align-items:center;
+    margin:2px;
+}
+
+.token{
+    display:inline-block;
+    padding:4px 7px;
+    border-radius:6px;
+    cursor:pointer;
+    user-select:text;
+    border:1px solid #ccc;
+    background:white;
+}
+
+.tag-H{
+    background:#2196f3;
+    color:white;
+    border:none;
+}
+
+.tag-N{
+    background:#4caf50;
+    color:white;
+    border:none;
+}
+
+.tag-B{
+    background:black;
+    color:black;
+    border:none;
+}
+
+.label{
+    font-size:10px;
+    font-weight:700;
+    margin-left:4px;
+    opacity:0.9;
+}
+
+.check{
+    margin-right:3px;
+}
+
+.menu{
+    position:fixed;
+    background:white;
+    border:1px solid #ccc;
+    border-radius:8px;
+    display:none;
+    z-index:999;
+    overflow:hidden;
+}
+
+.menu button{
+    display:block;
+    width:100%;
+    border:none;
+    background:white;
+    padding:8px 12px;
+    text-align:left;
+    cursor:pointer;
+}
+
+.menu button:hover{
+    background:#eee;
+}
+
+footer{
+    position:sticky;
+    bottom:0;
+    background:white;
+    padding:12px;
+    display:flex;
+    gap:10px;
+    box-shadow:0 -2px 8px rgba(0,0,0,0.1);
+    margin-top:20px;
+}
+
+button{
+    padding:8px 14px;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+}
+
+</style>
+</head>
+<body>
+
+<h1>品詞タグ付けキット(for misskey)</h1>
+<p>あなたのMisskeyアカウントの投稿に品詞タグを付けます。タグ付けから送信までは、全てブラウザ上で行います。</p>
+<div class="controls">
+
+<input type="file" id="fileInput">
+
+<select id="limitSelect">
+<option>20</option>
+<option selected>50</option>
+<option>100</option>
+<option>200</option>
+</select>
+
+<button onclick="reapplyDictionaries()">
+更新
+</button>
+
+<div class="csv-wrap">
+
+<div class="csv-box">
+<h3>ユーザー名/人名</h3>
+<textarea id="humanCSV"></textarea>
+</div>
+
+<div class="csv-box">
+<h3>固有名詞</h3>
+<textarea id="nounCSV"></textarea>
+</div>
+
+<div class="csv-box">
+<h3>ブラックリスト</h3>
+<textarea id="blackCSV"></textarea>
+</div>
+
+</div>
+
+</div>
+<br>
+<h3>〈使用方法〉</h3>
+<p>①.<a href="https://misskey.io/settings/account-data">misskeyの設定ページ</a>の「すべてのノート」から、ファイルをエクスポートしてください。<br>
+②.「ファイルを選択」を押して、エクスポートしたファイルを使用してください(アップロードされることはありませんが、拡張子が.jsonでなければ動きません。)<br>
+③.取得数をメニューから選択します。<br>
+④.3つのリストを入力します。それぞれ「比叡山坂本,激無双らーめん,ランダルコーポ」の様に入力してください。<br>
+⑤.「投稿を読み込む」を押してください。投稿が読み込まれ、判定された名前が青色、その他の名詞が緑色で表示されます。<br>
+　もし、判定が間違っている部分があれば、修正してもらえると助かります(修正せずにGoogleフォームに送信すると、もしブラックリストに入れ忘れていたとしてもデータは取り消せません！)。<br>
+⑥.カーソルで文字を選択するとリストへ追加するメニューが表示されます。<br>
+⑦.タグ付けがすべて終わったら「ダウンロード」を押してください。tokens.jsonがダウンロードされます。<br>
+⑧.<a href="https://forms.gle/oYczKv7k8GZ9D4Zz7">Googleフォーム</a>にtokens.jsonを添付して送信してください。<br>
+⑨.送信完了ページが表示されればすべて終わりです。お疲れ様でした！</p>
+<hr>
+
+<div id="notes"></div>
+
+<div class="menu" id="menu"></div>
+
+<footer>
+
+<button onclick="undo()">
+<h3><=</h3>
+</button>
+
+<button onclick="redo()">
+<h3>=></h3>
+</button>
+
+<button onclick="downloadJSON()">
+ダウンロード
+</button>
+
+</footer>
+
+<script src="kuromoji.js"></script>
+
+<script>
+
+let tokenizer;
+
+let dataset=[];
+
+let selectedText="";
+
+let menuToken=null;
+
+const undoStack=[];
+const redoStack=[];
+
+kuromoji.builder({
+    dicPath:"dict/"
+}).build((err,t)=>{
+
+    tokenizer=t;
+
+    console.log("kuromoji ready");
+});
+
+function saveState(){
+
+    undoStack.push(
+        JSON.stringify(dataset)
+    );
+
+    if(undoStack.length>100){
+        undoStack.shift();
+    }
+
+    redoStack.length=0;
+}
+
+function undo(){
+
+    if(undoStack.length===0)return;
+
+    redoStack.push(
+        JSON.stringify(dataset)
+    );
+
+    dataset=JSON.parse(
+        undoStack.pop()
+    );
+
+    render();
+}
+
+function redo(){
+
+    if(redoStack.length===0)return;
+
+    undoStack.push(
+        JSON.stringify(dataset)
+    );
+
+    dataset=JSON.parse(
+        redoStack.pop()
+    );
+
+    render();
+}
+
+function cleanMFM(text){
+
+    text=text.replace(
+        /\$\[[^\s\]]+\s([^\]]+)\]/g,
+        "$1"
+    );
+
+    text=text.replace(
+        /:[a-zA-Z0-9_]+:/g,
+        ""
+    );
+
+    text=text.replace(
+        /<[^>]+>/g,
+        ""
+    );
+
+    return text;
+}
+
+function tokenizeText(text){
+
+    text=cleanMFM(text);
+
+    text=text.replace(/\s+/g," ▁ ");
+
+    const tk=tokenizer.tokenize(text);
+
+    return tk.filter(
+        t=>t.surface_form.trim()!==""
+    );
+}
+
+function classifyToken(t){
+
+    if(
+        t.pos==="名詞" &&
+        t.pos_detail_1==="固有名詞" &&
+        t.pos_detail_2==="人名"
+    ){
+        return "H";
+    }
+
+    if(
+        t.pos==="名詞" &&
+        t.pos_detail_1==="固有名詞"
+    ){
+        return "N";
+    }
+
+    return "O";
+}
+
+function parseCSV(text){
+
+    return text
+        .split(/[,\n、\s]+/)
+        .map(v=>v.trim())
+        .filter(Boolean);
+}
+
+function visibleToken(t){
+
+    return t.replace(/^▁/,"");
+}
+
+function applyPhraseMatching(tokens,tags){
+
+    const humans=parseCSV(
+        document.getElementById("humanCSV").value
+    );
+
+    const nouns=parseCSV(
+        document.getElementById("nounCSV").value
+    );
+
+    const blacks=parseCSV(
+        document.getElementById("blackCSV").value
+    );
+
+    function apply(list,tag){
+
+        for(const word of list){
+
+            for(let i=0;i<tokens.length;i++){
+
+                let joined="";
+
+                for(let j=i;j<tokens.length;j++){
+
+                    joined+=visibleToken(tokens[j]);
+
+                    if(joined===word){
+
+                        for(let k=i;k<=j;k++){
+                            tags[k]=tag;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    apply(humans,"H");
+    apply(nouns,"N");
+    apply(blacks,"B");
+}
+
+function reapplyDictionaries(){
+
+    saveState();
+
+    dataset.forEach(row=>{
+
+        for(let i=0;i<row.tag.length;i++){
+
+            row.tag[i]="O";
+        }
+
+        applyPhraseMatching(
+            row.Token,
+            row.tag
+        );
+    });
+
+    render();
+}
+
+document.getElementById("fileInput")
+.addEventListener("change",e=>{
+
+    const file=e.target.files[0];
+
+    const reader=new FileReader();
+
+    reader.onload=ev=>{
+
+        const json=JSON.parse(ev.target.result);
+
+        const limit=parseInt(
+            document.getElementById("limitSelect").value
+        );
+
+        dataset=[];
+
+        for(const note of json.slice(0,limit)){
+
+            const text=note.text||"";
+
+            const tk=tokenizeText(text);
+
+            const tokens=tk.map(
+                v=>v.surface_form
+            );
+
+            const tags=tk.map(
+                classifyToken
+            );
+
+            applyPhraseMatching(tokens,tags);
+
+            dataset.push({
+                Token:tokens,
+                tag:tags,
+                enabled:tokens.map(
+                    v=>v.trim()!==""
+                )
+            });
+        }
+
+        render();
+    };
+
+    reader.readAsText(file);
+});
+
+function render(){
+
+    const root=document.getElementById("notes");
+
+    root.innerHTML="";
+
+    dataset.forEach((row,rowIndex)=>{
+
+        const div=document.createElement("div");
+
+        div.className="note";
+
+        row.Token.forEach((token,i)=>{
+
+            const wrap=document.createElement("span");
+
+            wrap.className="token-wrap";
+
+            const check=document.createElement("input");
+
+            check.type="checkbox";
+
+            check.className="check";
+
+            check.checked=row.enabled[i];
+
+            check.onchange=()=>{
+
+                row.enabled[i]=check.checked;
+            };
+
+            const span=document.createElement("span");
+
+            span.className=
+                "token tag-"+row.tag[i];
+
+            span.innerHTML=
+                renderTokenHTML(
+                    token,
+                    row.tag[i]
+                );
+
+            span.onclick=()=>{
+
+                saveState();
+
+                const order=["O","H","N","B"];
+
+                const idx=
+                    order.indexOf(row.tag[i]);
+
+                row.tag[i]=
+                    order[(idx+1)%order.length];
+
+                render();
+            };
+
+            span.oncontextmenu=(e)=>{
+
+                e.preventDefault();
+
+                menuToken={
+                    rowIndex,
+                    index:i
+                };
+
+                openMenu(
+                    e.pageX,
+                    e.pageY
+                );
+            };
+
+            wrap.appendChild(check);
+
+            wrap.appendChild(span);
+
+            div.appendChild(wrap);
+        });
+
+        root.appendChild(div);
+    });
+}
+
+function renderTokenHTML(token,tag){
+
+    const t=visibleToken(token);
+
+    if(tag==="B"){
+        return "████";
+    }
+
+    if(tag==="H"){
+        return `
+${t}
+<span class="label">
+Human
+</span>
+`;
+    }
+
+    if(tag==="N"){
+        return `
+${t}
+<span class="label">
+Noun
+</span>
+`;
+    }
+
+    return t;
+}
+
+function openMenu(x,y){
+
+    const menu=document.getElementById("menu");
+
+    menu.innerHTML=`
+
+<button onclick="mergeLeft()">
+左と結合
+</button>
+
+<button onclick="mergeRight()">
+右と結合
+</button>
+
+<button onclick="addSelection('H')">
+人名に追加
+</button>
+
+<button onclick="addSelection('N')">
+固有名詞追加
+</button>
+
+<button onclick="addSelection('B')">
+ブラックリスト追加
+</button>
+
+`;
+
+    menu.style.left=x+"px";
+    menu.style.top=y+"px";
+    menu.style.display="block";
+}
+
+function mergeTag(a,b){
+
+    const p={
+        B:4,
+        H:3,
+        N:2,
+        O:1
+    };
+
+    return p[a]>=p[b]?a:b;
+}
+
+function mergeLeft(){
+
+    saveState();
+
+    const r=menuToken.rowIndex;
+
+    const i=menuToken.index;
+
+    if(i<=0)return;
+
+    const row=dataset[r];
+
+    row.Token[i-1]+=row.Token[i];
+
+    row.tag[i-1]=mergeTag(
+        row.tag[i-1],
+        row.tag[i]
+    );
+
+    row.enabled[i-1]=
+        row.enabled[i-1] ||
+        row.enabled[i];
+
+    row.Token.splice(i,1);
+    row.tag.splice(i,1);
+    row.enabled.splice(i,1);
+
+    render();
+}
+
+function mergeRight(){
+
+    saveState();
+
+    const r=menuToken.rowIndex;
+
+    const i=menuToken.index;
+
+    const row=dataset[r];
+
+    if(i>=row.Token.length-1)return;
+
+    row.Token[i]+=row.Token[i+1];
+
+    row.tag[i]=mergeTag(
+        row.tag[i],
+        row.tag[i+1]
+    );
+
+    row.enabled[i]=
+        row.enabled[i] ||
+        row.enabled[i+1];
+
+    row.Token.splice(i+1,1);
+    row.tag.splice(i+1,1);
+    row.enabled.splice(i+1,1);
+
+    render();
+}
+
+function addSelection(type){
+
+    const ids={
+        H:"humanCSV",
+        N:"nounCSV",
+        B:"blackCSV"
+    };
+
+    const area=document.getElementById(
+        ids[type]
+    );
+
+    if(menuToken){
+
+        const row=dataset[
+            menuToken.rowIndex
+        ];
+
+        area.value+=
+            ","+
+            visibleToken(
+                row.Token[
+                    menuToken.index
+                ]
+            );
+    }
+
+    document.getElementById(
+        "menu"
+    ).style.display="none";
+}
+
+function randomFrom(arr,fallback){
+
+    if(arr.length===0){
+        return fallback;
+    }
+
+    return arr[
+        Math.floor(
+            Math.random()*arr.length
+        )
+    ];
+}
+
+function downloadJSON(){
+
+    const humans=parseCSV(
+        document.getElementById(
+            "humanCSV"
+        ).value
+    );
+
+    const nouns=parseCSV(
+        document.getElementById(
+            "nounCSV"
+        ).value
+    );
+
+    const result=dataset.map(row=>{
+
+        const outT=[];
+        const outTag=[];
+
+        for(let i=0;i<row.Token.length;i++){
+
+            if(!row.enabled[i]){
+                continue;
+            }
+
+            let token=
+                visibleToken(
+                    row.Token[i]
+                );
+
+            if(row.tag[i]==="B"){
+
+                token=randomFrom(
+                    humans.concat(nouns),
+                    "伏字"
+                );
+            }
+
+            outT.push(token);
+
+            outTag.push(row.tag[i]);
+        }
+
+        return {
+            Token:outT,
+            tag:outTag
+        };
+    });
+
+    const blob=new Blob(
+        [JSON.stringify(result,null,2)],
+        {
+            type:"application/json"
+        }
+    );
+
+    const a=document.createElement("a");
+
+    a.href=URL.createObjectURL(blob);
+
+    a.download="tokens.json";
+
+    a.click();
+}
+
+document.addEventListener(
+    "click",
+    e=>{
+
+        if(
+            !e.target.closest(".menu")
+        ){
+
+            document
+            .getElementById("menu")
+            .style.display="none";
+        }
+    }
+);
+
+</script>
+
+</body>
+</html>
