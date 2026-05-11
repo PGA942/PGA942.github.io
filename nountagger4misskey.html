@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>NER Editor(β)</title>
+
+<style>
+body{
+    font-family:sans-serif;
+    background:#f5f5f5;
+    margin:20px;
+}
+
+.controls{
+    margin-bottom:20px;
+}
+
+textarea{
+    width:100%;
+    min-height:40px;
+    max-height:200px;
+    border-radius:10px;
+
+}
+
+.token{
+    display:inline-block;
+    padding:3px 6px;
+    margin:2px;
+    border-radius:5px;
+    cursor:pointer;
+    user-select:text;
+    transition:0.1s;
+}
+
+.tag-O{
+    background:white;
+    border:1px solid #c0c0c0;
+}
+
+.tag-H{
+    background:#2196f3;
+    color:white;
+}
+
+.tag-N{
+    background:#4caf50;
+    color:white;
+}
+
+.tag-B{
+    background:black;
+    color:black;
+}
+
+.note{
+    background:white;
+    padding:10px;
+    border-radius:10px;
+    margin-bottom:12px;
+    box-shadow:0 1px 4px rgba(0,0,0,0.1);
+}
+
+.menu{
+    position:fixed;
+    background:white;
+    border:1px solid #ccc;
+    border-radius:8px;
+    display:none;
+    z-index:999;
+}
+
+.menu button{
+    display:block;
+    width:100%;
+    border:none;
+    background:white;
+    padding:8px;
+    cursor:pointer;
+}
+
+.menu button:hover{
+    background:#eee;
+}
+</style>
+</head>
+<body>
+
+<h1>品詞タグ付けキット(for misskey)</h1>
+<p>あなたのMisskeyアカウントの投稿に品詞タグを付けます。タグ付けから送信までは、全てブラウザ上で行います。</p>
+<div class="controls">
+
+<input type="file" id="fileInput">
+
+<select id="limitSelect">
+<option>20</option>
+<option selected>50</option>
+<option>100</option>
+<option>150</option>
+<option>250</option>
+<option>400</option>
+<option>500</option>
+</select>
+
+<button onclick="downloadJSON()">結果を保存</button>
+
+<br>
+
+<h3>ユーザー名/人名</h3>
+<textarea id="humanCSV"></textarea>
+
+<h3>固有名詞</h3>
+<textarea id="nounCSV"></textarea>
+
+<h3>ブラックリスト</h3>
+<textarea id="blackCSV"></textarea>
+
+</div>
+
+<br>
+<h3>〈使用方法〉</h3>
+<p>①.<a href="https://misskey.io/settings/account-data">misskeyの設定ページ</a>の「すべてのノート」から、ファイルをエクスポートしてください。<br>
+②.「ファイルを選択」を押して、エクスポートしたファイルを使用してください(アップロードされることはありませんが、拡張子が.jsonでなければ動きません。)<br>
+③.取得数をメニューから選択します。<br>
+④.3つのリストを入力します。それぞれ「比叡山坂本,激無双らーめん,ランダルコーポ」の様に入力してください。<br>
+⑤.「投稿を読み込む」を押してください。投稿が読み込まれ、判定された名前が青色、その他の名詞が緑色で表示されます。<br>
+　もし、判定が間違っている部分があれば、修正してもらえると助かります(修正せずにGoogleフォームに送信すると、もしブラックリストに入れ忘れていたとしてもデータは取り消せません！)。<br>
+⑥.カーソルで文字を選択するとリストへ追加するメニューが表示されます。<br>
+⑦.タグ付けがすべて終わったら「ダウンロード」を押してください。tokens.jsonがダウンロードされます。<br>
+⑧.<a href="https://forms.gle/oYczKv7k8GZ9D4Zz7">Googleフォーム</a>にtokens.jsonを添付して送信してください。<br>
+⑨.送信完了ページが表示されればすべて終わりです。お疲れ様でした！</p>
+<hr>
+<h2>ノート</h2>
+<div id="notes"></div>
+
+<div class="menu" id="menu">
+<button onclick="addSelection('H')">人名に追加</button>
+<button onclick="addSelection('N')">固有名詞追加</button>
+<button onclick="addSelection('B')">ブラックリスト追加</button>
+</div>
+
+<script src="kuromoji.js"></script>
+
+<script>
+
+let tokenizer;
+
+let dataset=[];
+
+const humanList=[];
+const nounList=[];
+const blackList=[];
+
+let selectedText="";
+
+kuromoji.builder({
+    dicPath:"dict/"
+}).build((err,t)=>{
+
+    tokenizer=t;
+
+    console.log("ready");
+});
+
+function cleanMFM(text){
+
+    text=text.replace(/\\$\\[[^\\s\\]]+\\s([^\\]]+)\\]/g,"$1");
+
+    text=text.replace(/:[a-zA-Z0-9_]+:/g,"");
+
+    text=text.replace(/<[^>]+>/g,"");
+
+    return text;
+}
+
+function classifyToken(token){
+
+    if(
+        token.pos==="名詞" &&
+        token.pos_detail_1==="固有名詞" &&
+        token.pos_detail_2==="人名"
+    ){
+        return "H";
+    }
+
+    if(
+        token.pos==="名詞" &&
+        token.pos_detail_1==="固有名詞"
+    ){
+        return "N";
+    }
+
+    return "O";
+}
+
+function parseCSV(text){
+
+    return text
+        .split(/[,\n、\s]+/)
+        .map(v=>v.trim())
+        .filter(Boolean);
+}
+
+function applyPhraseMatching(tokens,tags){
+
+    const allHuman=parseCSV(
+        document.getElementById("humanCSV").value
+    );
+
+    const allNoun=parseCSV(
+        document.getElementById("nounCSV").value
+    );
+
+    const allBlack=parseCSV(
+        document.getElementById("blackCSV").value
+    );
+
+    function apply(list,tag){
+
+        for(const word of list){
+
+            for(let i=0;i<tokens.length;i++){
+
+                let joined="";
+
+                for(let j=i;j<tokens.length;j++){
+
+                    joined+=tokens[j];
+
+                    if(joined===word){
+
+                        for(let k=i;k<=j;k++){
+                            tags[k]=tag;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    apply(allHuman,"H");
+    apply(allNoun,"N");
+    apply(allBlack,"B");
+}
+
+document.getElementById("fileInput")
+.addEventListener("change",e=>{
+
+    const file=e.target.files[0];
+
+    const reader=new FileReader();
+
+    reader.onload=ev=>{
+
+        const json=JSON.parse(ev.target.result);
+
+        const limit=parseInt(
+            document.getElementById("limitSelect").value
+        );
+
+        dataset=[];
+
+        for(const note of json.slice(0,limit)){
+
+            let text=cleanMFM(note.text||"");
+
+            const tk=tokenizer.tokenize(text);
+
+            const tokens=tk.map(v=>v.surface_form);
+
+            const tags=tk.map(classifyToken);
+
+            applyPhraseMatching(tokens,tags);
+
+            dataset.push({
+                Token:tokens,
+                tag:tags
+            });
+        }
+
+        render();
+    };
+
+    reader.readAsText(file);
+});
+
+function render(){
+
+    const root=document.getElementById("notes");
+
+    root.innerHTML="";
+
+    dataset.forEach((row,rowIndex)=>{
+
+        const div=document.createElement("div");
+
+        div.className="note";
+
+        row.Token.forEach((token,i)=>{
+
+            const span=document.createElement("span");
+
+            span.className="token tag-"+row.tag[i];
+
+            span.textContent=displayToken(
+                token,
+                row.tag[i]
+            );
+
+            span.onclick=()=>{
+
+                const order=["O","H","N","B"];
+
+                const idx=order.indexOf(row.tag[i]);
+
+                row.tag[i]=order[(idx+1)%order.length];
+
+                render();
+            };
+
+            div.appendChild(span);
+        });
+
+        root.appendChild(div);
+    });
+}
+
+function displayToken(token,tag){
+
+    if(tag==="B"){
+        return "████";
+    }
+
+    if(tag==="H"){
+        return token+" Human";
+    }
+
+    if(tag==="N"){
+        return token+" Noun";
+    }
+
+    return token;
+}
+
+function randomFrom(arr,fallback){
+
+    if(arr.length===0){
+        return fallback;
+    }
+
+    return arr[
+        Math.floor(Math.random()*arr.length)
+    ];
+}
+
+function downloadJSON(){
+
+    const humans=parseCSV(
+        document.getElementById("humanCSV").value
+    );
+
+    const nouns=parseCSV(
+        document.getElementById("nounCSV").value
+    );
+
+    const result=dataset.map(row=>{
+
+        const out=[...row.Token];
+
+        for(let i=0;i<out.length;i++){
+
+            if(row.tag[i]==="B"){
+
+                const prev=row.tag[i-1];
+
+                if(prev==="H"){
+                    out[i]=randomFrom(humans,"山田");
+                }else{
+                    out[i]=randomFrom(nouns,"東京都");
+                }
+            }
+        }
+
+        return {
+            Token:out,
+            tag:row.tag
+        };
+    });
+
+    const blob=new Blob(
+        [JSON.stringify(result,null,2)],
+        {type:"application/json"}
+    );
+
+    const a=document.createElement("a");
+
+    a.href=URL.createObjectURL(blob);
+
+    a.download="tokens.json";
+
+    a.click();
+}
+
+document.addEventListener("mouseup",e=>{
+
+    const text=window.getSelection().toString().trim();
+
+    if(!text){
+        document.getElementById("menu").style.display="none";
+        return;
+    }
+
+    selectedText=text;
+
+    const menu=document.getElementById("menu");
+
+    menu.style.display="block";
+
+    menu.style.left=e.pageX+"px";
+    menu.style.top=e.pageY+"px";
+});
+
+function addSelection(type){
+
+    const ids={
+        H:"humanCSV",
+        N:"nounCSV",
+        B:"blackCSV"
+    };
+
+    const area=document.getElementById(ids[type]);
+
+    area.value+=","+selectedText;
+
+    document.getElementById("menu").style.display="none";
+}
+
+document.addEventListener("click",e=>{
+
+    if(!e.target.closest(".menu")){
+        setTimeout(()=>{
+            document.getElementById("menu").style.display="none";
+        },100);
+    }
+});
+
+</script>
+
+</body>
+</html>
