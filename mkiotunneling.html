@@ -67,7 +67,8 @@ button{
 <body>
 
 <h2>Misskey 品詞タグ付けマシン(for misskey.io)</h2>
-<p>あなたのMisskeyアカウントの投稿に品詞タグを付けます。投稿の取得からタグ付けまで、全てブラウザ上で行います。misskey.io以外のサーバーは<a href="https://pga942.github.io/index.html">v1</a>からお願いします。<br>
+<p>あなたのMisskeyアカウントの投稿に品詞タグを付けます。Misskey.IOのセキュリティ設定の関係でCloudFlareにバイパスさせて取得しています。<br>
+そのため、タグ付け完了後は「<a href="https://misskey.io/settings/apps">アクセストークンを管理</a>」から「Misskey NOUN Word Tagger」を削除してください。misskey.io以外のサーバーは<a href="https://pga942.github.io/index.html">v1</a>からお願いします。<br>
 </p>
 <div id="menu">
 
@@ -82,7 +83,7 @@ button{
 <input id="token" size="60">
 <button onclick="startMiAuth()">MiAuthログイン</button>
 <p>
-もしうまくいかない場合は、以下2つの権限をONにして、Misskey設定→API→アクセストークン生成<br>
+もしうまくいかない場合は、以下2つの権限をONにして、<a href="https://misskey.io/settings/connect#BlJ2rsw9h">Misskey設定→API→アクセストークン生成</a><br>
 の順にボタンを押して、ポップアップに表示された英数字をコピペしてください。
 </p>
 
